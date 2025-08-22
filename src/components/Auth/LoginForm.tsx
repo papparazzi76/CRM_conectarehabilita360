@@ -4,7 +4,8 @@ import { Lock, Mail, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export function LoginForm() {
-  const { signIn, loading } = useAuth();
+  const { signIn } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false); // Estado de carga local
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -13,14 +14,19 @@ export function LoginForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return; // Evita envíos múltiples
+    setIsSubmitting(true);
 
     try {
       await signIn(formData.email, formData.password);
-      toast.success('Sesión iniciada correctamente');
+      // La redirección ocurrirá automáticamente gracias al hook useAuth
+      // No es necesario un toast de éxito aquí, ya que el cambio de página es suficiente feedback
     } catch (error: any) {
       console.error('Login error:', error);
       const errorMessage = error.message || 'Verifica tus credenciales.';
-      toast.error(`Error al iniciar sesión: ${errorMessage}`);
+      toast.error(`Error: ${errorMessage}`);
+    } finally {
+      setIsSubmitting(false); // Finaliza el estado de carga en cualquier caso
     }
   };
 
@@ -56,7 +62,6 @@ export function LoginForm() {
                   id="email"
                   name="email"
                   type="email"
-                  autoComplete="email"
                   required
                   value={formData.email}
                   onChange={handleChange}
@@ -78,7 +83,6 @@ export function LoginForm() {
                   id="password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
                   required
                   value={formData.password}
                   onChange={handleChange}
@@ -101,10 +105,10 @@ export function LoginForm() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={isSubmitting}
               className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+              {isSubmitting ? 'Iniciando sesión...' : 'Iniciar Sesión'}
             </button>
           </form>
 
