@@ -23,7 +23,7 @@ export class AuthService {
 
     if (authData.user) {
       // Crear perfil de usuario
-      const { error: profileError } = await supabase
+      const { data: userProfile, error: profileError } = await supabase
         .from('users')
         .insert({
           auth_user_id: authData.user.id,
@@ -32,17 +32,13 @@ export class AuthService {
           company_name: userData.company_name,
           nif_cif: userData.nif_cif,
           phone: userData.phone,
-        });
+        })
+        .select()
+        .single();
 
       if (profileError) throw profileError;
 
       // Crear wallet de créditos
-      const { data: userProfile } = await supabase
-        .from('users')
-        .select('id')
-        .eq('auth_user_id', authData.user.id)
-        .single();
-
       if (userProfile) {
         await supabase
           .from('credit_wallets')
@@ -72,16 +68,28 @@ export class AuthService {
   }
 
   static async getCurrentUser(): Promise<AuthUser | null> {
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) return null;
+    // Primero, obtenemos la sesión. Esto nos da el usuario autenticado.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return null;
+    }
 
-    // Obtener perfil del usuario
-    const { data: profile } = await supabase
+    const user = session.user;
+
+    // Luego, obtenemos el perfil de nuestra tabla 'users' pública.
+    // La política RLS que creamos antes asegura que esto no falle.
+    const { data: profile, error: profileError } = await supabase
       .from('users')
       .select('*')
       .eq('auth_user_id', user.id)
       .single();
+
+    if (profileError) {
+      console.error("Error fetching user profile:", profileError.message);
+      // Si el perfil no se encuentra, cerramos la sesión para evitar inconsistencias.
+      await this.signOut();
+      return null;
+    }
 
     return {
       ...user,
@@ -93,7 +101,7 @@ export class AuthService {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-    
+
     if (error) throw error;
   }
 
@@ -101,7 +109,7 @@ export class AuthService {
     const { error } = await supabase.auth.updateUser({
       password: newPassword,
     });
-    
+
     if (error) throw error;
   }
 }
