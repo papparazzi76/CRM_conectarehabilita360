@@ -13,13 +13,14 @@ export function LoginForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       await signIn(formData.email, formData.password);
       toast.success('Sesión iniciada correctamente');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      toast.error('Error al iniciar sesión. Verifica tus credenciales.');
+      const errorMessage = error.message || 'Verifica tus credenciales.';
+      toast.error(`Error al iniciar sesión: ${errorMessage}`);
     }
   };
 
@@ -55,6 +56,7 @@ export function LoginForm() {
                   id="email"
                   name="email"
                   type="email"
+                  autoComplete="email"
                   required
                   value={formData.email}
                   onChange={handleChange}
@@ -76,6 +78,7 @@ export function LoginForm() {
                   id="password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   required
                   value={formData.password}
                   onChange={handleChange}
@@ -107,7 +110,7 @@ export function LoginForm() {
 
           <div className="mt-8 text-center">
             <p className="text-sm text-gray-600">
-              Demo: admin@demo.com / empresa@demo.com (password: 123456)
+              Demo: admin@demo.com / empresa1@demo.com (pass: 123456)
             </p>
           </div>
         </div>
