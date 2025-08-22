@@ -16,27 +16,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // onAuthStateChange se ejecuta al cargar la página con la sesión actual
-    // y cada vez que cambia el estado de autenticación.
+    // --- INICIO: Lógica a prueba de fallos ---
+
+    // Temporizador de seguridad por si Supabase no responde
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.warn("Auth timeout: Supabase no respondió a tiempo.");
+        setLoading(false);
+      }
+    }, 5000); // 5 segundos de espera máxima
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        if (session?.user) {
-          const currentUser = await AuthService.getCurrentUser();
-          setUser(currentUser);
-        } else {
-          setUser(null);
-        }
+        const currentUser = session ? await AuthService.getCurrentUser() : null;
+        setUser(currentUser);
       } catch (error) {
-        console.error("Error handling auth state change:", error);
+        console.error("Error al refrescar la sesión:", error);
         setUser(null);
       } finally {
-        // Esto es clave: aseguramos que el estado de carga finalice
-        // después de procesar el primer evento de autenticación.
+        // Cuando onAuthStateChange responde, cancelamos el temporizador y finalizamos la carga.
+        clearTimeout(timeoutId);
         setLoading(false);
       }
     });
 
-    // Limpiamos la suscripción al desmontar el componente
+    // --- FIN: Lógica a prueba de fallos ---
+
     return () => {
       subscription?.unsubscribe();
     };
