@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
 
+// ... (la interfaz Lead y Filters se mantienen igual) ...
 interface Lead {
   id: string;
   province_id: number | null;
@@ -54,50 +55,33 @@ export function LeadBoard() {
   const loadLeads = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase
-        .from('leads')
-        .select(`
-          *,
-          provinces(name),
-          municipalities(name),
-          work_types(name)
-        `)
-        .eq('publication_status', 'DISPONIBLE');
+      const params = {
+        p_province_id: filters.province ? parseInt(filters.province, 10) : null,
+        p_work_type_id: filters.workType ? parseInt(filters.workType, 10) : null,
+        p_is_urgent: filters.urgentOnly ? true : null,
+        p_min_value: filters.minValue ? parseFloat(filters.minValue) : null,
+        p_max_value: filters.maxValue ? parseFloat(filters.maxValue) : null,
+      };
 
-      // Aplicar filtros
-      if (filters.province) {
-        query = query.eq('province_id', parseInt(filters.province, 10));
-      }
-      if (filters.workType) {
-        query = query.eq('work_type_id', parseInt(filters.workType, 10));
-      }
-      if (filters.urgentOnly) {
-        query = query.eq('is_urgent', true);
-      }
-      if (filters.minValue) {
-        query = query.gte('project_value', parseFloat(filters.minValue));
-      }
-      if (filters.maxValue) {
-        query = query.lte('project_value', parseFloat(filters.maxValue));
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
+      const { data, error } = await supabase.rpc('get_available_leads', params);
 
       if (error) throw error;
 
-      // Obtener conteo de shares para cada lead
-      const leadsWithShares = await Promise.all(
-        (data || []).map(async (lead) => {
-          const { count } = await supabase
-            .from('lead_shares')
-            .select('*', { count: 'exact', head: true })
-            .eq('lead_id', lead.id);
+      const formattedLeads = data.map((lead: any) => ({
+        ...lead,
+        provinces: { name: lead.province_name },
+        municipalities: { name: lead.municipality_name },
+        work_types: { name: lead.work_type_name },
+        _shares_count: lead.shares_count,
+      }));
 
-          return { ...lead, _shares_count: count || 0 };
-        })
-      );
+      const finalLeads = filters.search
+        ? formattedLeads.filter((lead: Lead) =>
+            lead.municipalities?.name?.toLowerCase().includes(filters.search.toLowerCase())
+          )
+        : formattedLeads;
 
-      setLeads(leadsWithShares);
+      setLeads(finalLeads);
     } catch (error) {
       console.error('Error loading leads:', error);
       toast.error('Error al cargar los leads.');
@@ -118,31 +102,19 @@ export function LeadBoard() {
         if (workTypesRes.data) setWorkTypes(workTypesRes.data);
         if (walletRes?.data) setUserBalance(walletRes.data.balance);
 
-        await loadLeads();
     } catch (error) {
         console.error('Error loading initial data:', error);
         toast.error('Error cargando datos iniciales.');
     }
-  }, [user, loadLeads]);
+  }, [user]);
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
   useEffect(() => {
-    const channel = supabase.channel('realtime-leads')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
-        loadLeads();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_shares' }, () => {
-        loadLeads();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, loadLeads]);
+    loadLeads();
+  }, [loadLeads]);
 
   const handleRequestLead = async (leadId: string, competitionLevel: number, isExclusive: boolean, cost: number) => {
     if (!user?.profile) return;
@@ -163,13 +135,14 @@ export function LeadBoard() {
 
         if (error) throw error;
 
-        if (data && !data[0].success) {
-            throw new Error(data[0].message);
+        const result = data as unknown as { success: boolean, message: string }[];
+        if (result && !result[0].success) {
+            throw new Error(result[0].message);
         }
 
         toast.success('Lead solicitado correctamente');
         setUserBalance(prev => prev - cost);
-        await loadLeads(); // Recargar leads para actualizar disponibilidad
+        await loadLeads();
 
     } catch (error: any) {
         console.error('Error requesting lead:', error);
@@ -189,7 +162,8 @@ export function LeadBoard() {
     );
   }
 
-  return (
+  // ... (el resto del JSX del return se mantiene igual) ...
+   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
