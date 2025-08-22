@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, RefreshCw } from 'lucide-react';
 import { LeadCard } from './LeadCard';
 import { supabase } from '../../lib/supabase';
@@ -51,39 +51,7 @@ export function LeadBoard() {
   const [provinces, setProvinces] = useState<{id: number, name: string}[]>([]);
   const [workTypes, setWorkTypes] = useState<{id: number, name: string}[]>([]);
 
-  useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  useEffect(() => {
-    loadLeads();
-  }, [filters]);
-
-  const loadInitialData = async () => {
-    try {
-      // Cargar catálogos
-      const [provincesRes, workTypesRes, walletRes] = await Promise.all([
-        supabase.from('provinces').select('id, name').order('name'),
-        supabase.from('work_types').select('id, name').order('name'),
-        user?.profile ? supabase
-          .from('credit_wallets')
-          .select('balance')
-          .eq('user_id', user.profile.id)
-          .single() : null,
-      ]);
-
-      if (provincesRes.data) setProvinces(provincesRes.data);
-      if (workTypesRes.data) setWorkTypes(workTypesRes.data);
-      if (walletRes?.data) setUserBalance(walletRes.data.balance);
-
-      await loadLeads();
-    } catch (error) {
-      console.error('Error loading initial data:', error);
-      toast.error('Error cargando datos iniciales');
-    }
-  };
-
-  const loadLeads = async () => {
+  const loadLeads = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase
@@ -98,10 +66,10 @@ export function LeadBoard() {
 
       // Aplicar filtros
       if (filters.province) {
-        query = query.eq('province_id', parseInt(filters.province));
+        query = query.eq('province_id', parseInt(filters.province, 10));
       }
       if (filters.workType) {
-        query = query.eq('work_type_id', parseInt(filters.workType));
+        query = query.eq('work_type_id', parseInt(filters.workType, 10));
       }
       if (filters.urgentOnly) {
         query = query.eq('is_urgent', true);
@@ -124,7 +92,7 @@ export function LeadBoard() {
             .from('lead_shares')
             .select('*', { count: 'exact', head: true })
             .eq('lead_id', lead.id);
-          
+
           return { ...lead, _shares_count: count || 0 };
         })
       );
@@ -132,42 +100,82 @@ export function LeadBoard() {
       setLeads(leadsWithShares);
     } catch (error) {
       console.error('Error loading leads:', error);
-      toast.error('Error cargando leads');
+      toast.error('Error al cargar los leads.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters]);
+
+  const loadInitialData = useCallback(async () => {
+    try {
+        const [provincesRes, workTypesRes, walletRes] = await Promise.all([
+            supabase.from('provinces').select('id, name').order('name'),
+            supabase.from('work_types').select('id, name').order('name'),
+            user?.profile ? supabase.from('credit_wallets').select('balance').eq('user_id', user.profile.id).single() : null,
+        ]);
+
+        if (provincesRes.data) setProvinces(provincesRes.data);
+        if (workTypesRes.data) setWorkTypes(workTypesRes.data);
+        if (walletRes?.data) setUserBalance(walletRes.data.balance);
+
+        await loadLeads();
+    } catch (error) {
+        console.error('Error loading initial data:', error);
+        toast.error('Error cargando datos iniciales.');
+    }
+  }, [user, loadLeads]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  useEffect(() => {
+    const channel = supabase.channel('realtime-leads')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
+        loadLeads();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_shares' }, () => {
+        loadLeads();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, loadLeads]);
 
   const handleRequestLead = async (leadId: string, competitionLevel: number, isExclusive: boolean, cost: number) => {
     if (!user?.profile) return;
 
-    try {
-      // Verificar saldo suficiente
-      if (userBalance < cost) {
-        toast.error('Saldo insuficiente para solicitar este lead');
+    if (userBalance < cost) {
+        toast.error('Saldo insuficiente para solicitar este lead.');
         return;
-      }
-
-      // Crear transacción de créditos y solicitud de lead
-      const { error: transactionError } = await supabase.rpc('process_lead_request', {
-        p_user_id: user.profile.id,
-        p_lead_id: leadId,
-        p_competition_level: competitionLevel,
-        p_is_exclusive: isExclusive,
-        p_credit_cost: cost,
-      });
-
-      if (transactionError) throw transactionError;
-
-      toast.success('Lead solicitado correctamente');
-      setUserBalance(prev => prev - cost);
-      await loadLeads(); // Recargar leads para actualizar disponibilidad
-
-    } catch (error) {
-      console.error('Error requesting lead:', error);
-      toast.error('Error al solicitar el lead');
     }
-  };
+
+    try {
+        const { data, error } = await supabase.rpc('process_lead_request', {
+            p_user_id: user.profile.id,
+            p_lead_id: leadId,
+            p_competition_level: competitionLevel,
+            p_is_exclusive: isExclusive,
+            p_credit_cost: cost,
+        });
+
+        if (error) throw error;
+
+        if (data && !data[0].success) {
+            throw new Error(data[0].message);
+        }
+
+        toast.success('Lead solicitado correctamente');
+        setUserBalance(prev => prev - cost);
+        await loadLeads(); // Recargar leads para actualizar disponibilidad
+
+    } catch (error: any) {
+        console.error('Error requesting lead:', error);
+        toast.error(`Error al solicitar el lead: ${error.message}`);
+    }
+};
 
   const handleFilterChange = (key: keyof Filters, value: string | boolean) => {
     setFilters(prev => ({ ...prev, [key]: value }));
