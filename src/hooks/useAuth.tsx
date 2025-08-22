@@ -16,29 +16,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const checkUser = async () => {
+    // onAuthStateChange se ejecuta al cargar la página con la sesión actual
+    // y cada vez que cambia el estado de autenticación.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        const currentUser = await AuthService.getCurrentUser();
-        setUser(currentUser);
-      } catch (e) {
-        console.error('Error fetching initial user:', e);
+        if (session?.user) {
+          const currentUser = await AuthService.getCurrentUser();
+          setUser(currentUser);
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error("Error handling auth state change:", error);
         setUser(null);
       } finally {
+        // Esto es clave: aseguramos que el estado de carga finalice
+        // después de procesar el primer evento de autenticación.
         setLoading(false);
-      }
-    };
-
-    checkUser();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        const currentUser = await AuthService.getCurrentUser();
-        setUser(currentUser);
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
       }
     });
 
+    // Limpiamos la suscripción al desmontar el componente
     return () => {
       subscription?.unsubscribe();
     };
@@ -47,9 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = {
     user,
     loading,
-    signIn: async (email: string, password: string) => {
-      await AuthService.signIn(email, password);
-    },
+    signIn: AuthService.signIn,
     signOut: async () => {
       await AuthService.signOut();
       setUser(null);
